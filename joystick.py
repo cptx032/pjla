@@ -2,6 +2,7 @@
 import os
 import atexit
 import select
+import sys
 
 JS_EVENT_BUTTON = 0x01  # pressed/released
 JS_EVENT_AXIS = 0x02  # joystick moved
@@ -22,6 +23,8 @@ KM_ML_L2 = 6
 KM_ML_R2 = 7
 KM_ML_SELECT = 8
 KM_ML_START = 9
+
+PYTHON_3 =  sys.version_info > (3, 0)
 
 
 class JoystickEvent:
@@ -109,9 +112,12 @@ class Joystick:
 
             if event.type == JS_EVENT_BUTTON:
                 key = None
-                if event.value[0] == JS_BUTTON_RELEASE:
+                button = event.value[0]
+                if not PYTHON_3:
+                    button = ord(button)
+                if button == JS_BUTTON_RELEASE:
                     key = Joystick.BUTTON_RELEASE
-                elif event.value[0] == JS_BUTTON_PRESS:
+                elif button == JS_BUTTON_PRESS:
                     key = Joystick.BUTTON_PRESS
                 if key:
                     for func in self.function_map[key]:
