@@ -11,6 +11,12 @@ JS_EVENT_INIT = 0x80
 JS_BUTTON_RELEASE = 0x00
 JS_BUTTON_PRESS = 0x01
 
+# Arrows (directional keys)
+DIR_ARROW_UP = 'U'
+DIR_ARROW_RIGHT = 'R'
+DIR_ARROW_DOWN = 'D'
+DIR_ARROW_LEFT = 'L'
+
 # MK: key map
 # ML: multilaser joystick (tested on a JS028 joypad)
 KM_ML_TRIANGLE = 0
@@ -23,6 +29,20 @@ KM_ML_L2 = 6
 KM_ML_R2 = 7
 KM_ML_SELECT = 8
 KM_ML_START = 9
+KM_ML_L3 = 10
+KM_ML_R3 = 11
+
+# Analog off
+KM_ML_ARROW_AXIS_X = 0
+KM_ML_ARROW_AXIS_Y = 1
+
+# Analog on
+KM_ML_LEFT_STICK_AXIS_X = 0
+KM_ML_LEFT_STICK_AXIS_Y = 1
+KM_ML_RIGHT_STICK_AXIS_X = 2
+KM_ML_RIGHT_STICK_AXIS_Y = 3
+KM_ML_ARROWA_AXIS_X = 4
+KM_ML_ARROWA_AXIS_Y = 5
 
 PYTHON_3 =  sys.version_info > (3, 0)
 
@@ -34,9 +54,33 @@ class JoystickEvent:
         u"""raw_8_bytes_data must be a string."""
         assert len(raw_8_bytes_data) == 8, u'Invalid size of data'
         self.time = raw_8_bytes_data[:4]
-        self.value = raw_8_bytes_data[4:6]
+        self.value = int.from_bytes(raw_8_bytes_data[4:6], sys.byteorder, signed=True)
         self.type = ord(raw_8_bytes_data[6:7])
         self.number = ord(raw_8_bytes_data[7:8])
+        self.direction = self.set_direction()
+
+    def set_direction(self):
+        x_axis = [KM_ML_ARROW_AXIS_X,
+                  KM_ML_LEFT_STICK_AXIS_X,
+                  KM_ML_RIGHT_STICK_AXIS_X,
+                  KM_ML_ARROWA_AXIS_X]
+
+        y_axis = [KM_ML_ARROW_AXIS_Y,
+                  KM_ML_LEFT_STICK_AXIS_Y,
+                  KM_ML_RIGHT_STICK_AXIS_Y,
+                  KM_ML_ARROWA_AXIS_Y]
+
+        if self.type == JS_EVENT_AXIS:
+            if (self.number in x_axis) and (self.value < 0):
+                return DIR_ARROW_LEFT
+            elif (self.number in x_axis) and (self.value > 0):
+                return DIR_ARROW_RIGHT
+
+            if (self.number in y_axis) and (self.value < 0):
+                return DIR_ARROW_UP
+            elif (self.number in y_axis) and (self.value > 0):
+                return DIR_ARROW_DOWN
+
 
 
 class Joystick:
@@ -50,7 +94,7 @@ class Joystick:
         u"""If you want make blocking set timeout to None."""
         self.timeout = timeout
         if not device_path:
-            device_path = u'/dev/input/js0'
+            device_path = u'/dev/input/js1'
         self.device_file = None
         if os.path.exists(device_path):
             self.device_file = open(device_path, u'rb')
@@ -106,13 +150,14 @@ class Joystick:
         while read:
             # each event has 8 bytes
             event = JoystickEvent(self.device_file.read(8))
+            print('\nType: %d\nNumber: %d\nValue: %d\nDirection: %s\n' % (event.type, event.number, event.value, event.direction))
             # running events
             for func in self.function_map.get(Joystick.ANY):
                 func(event)
 
             if event.type == JS_EVENT_BUTTON:
                 key = None
-                button = event.value[0]
+                button = event.value
                 if not PYTHON_3:
                     button = ord(button)
                 if button == JS_BUTTON_RELEASE:
