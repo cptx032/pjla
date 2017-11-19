@@ -1,6 +1,7 @@
 # coding: utf-8
-import os
 import atexit
+import glob
+import os
 import select
 import sys
 
@@ -18,7 +19,7 @@ DIR_ARROW_DOWN = 'D'
 DIR_ARROW_LEFT = 'L'
 
 # MK: key map
-# ML: multilaser joystick (tested on a JS028 joypad)
+# ML: multilaser joystick (tested on a JS028 and JS030 joypad)
 KM_ML_TRIANGLE = 0
 KM_ML_CIRCLE = 1
 KM_ML_X = 2
@@ -44,22 +45,23 @@ KM_ML_RIGHT_STICK_AXIS_Y = 3
 KM_ML_ARROWA_AXIS_X = 4
 KM_ML_ARROWA_AXIS_Y = 5
 
-PYTHON_3 =  sys.version_info > (3, 0)
-
 
 class JoystickEvent:
-    u"""Represent a Joystick event."""
+    """Represent a Joystick event."""
 
     def __init__(self, raw_8_bytes_data):
-        u"""raw_8_bytes_data must be a string."""
-        assert len(raw_8_bytes_data) == 8, u'Invalid size of data'
+        """raw_8_bytes_data must be a string."""
+        assert len(raw_8_bytes_data) == 8, 'Invalid size of data'
         self.time = raw_8_bytes_data[:4]
-        self.value = int.from_bytes(raw_8_bytes_data[4:6], sys.byteorder, signed=True)
+        self.value = int.from_bytes(
+            raw_8_bytes_data[4:6],
+            sys.byteorder, signed=True)
         self.type = ord(raw_8_bytes_data[6:7])
         self.number = ord(raw_8_bytes_data[7:8])
-        self.direction = self.set_direction()
+        self.direction = self.get_direction()
 
-    def set_direction(self):
+    def get_direction(self):
+        """Get which arrow button key was pressed."""
         x_axis = [KM_ML_ARROW_AXIS_X,
                   KM_ML_LEFT_STICK_AXIS_X,
                   KM_ML_RIGHT_STICK_AXIS_X,
@@ -82,31 +84,42 @@ class JoystickEvent:
                 return DIR_ARROW_DOWN
 
 
-
 class Joystick:
-    u"""Represent a Joystick."""
+    """Represent a Joystick."""
 
     ANY = 0
     BUTTON_PRESS = 1
     BUTTON_RELEASE = 2
+    ARROW_PRESS = 3
+    ARROW_RELEASE = 4
 
-    def __init__(self, timeout=0.1, device_path=None):
-        u"""If you want make blocking set timeout to None."""
+    def __init__(self, timeout=0.1, device_path=None, verbose=False):
+        """If you want make blocking set timeout to None."""
         self.timeout = timeout
+        self.verbose = verbose
         if not device_path:
-            device_path = u'/dev/input/js1'
+            # getting the first device found
+            devices = self.get_joystick_devices()
+            if devices:
+                device_path = devices[0]
         self.device_file = None
         if os.path.exists(device_path):
-            self.device_file = open(device_path, u'rb')
+            self.device_file = open(device_path, 'rb')
             atexit.register(self.device_file.close)
         self.function_map = {
             Joystick.ANY: list(),
             Joystick.BUTTON_PRESS: list(),
-            Joystick.BUTTON_RELEASE: list()
+            Joystick.BUTTON_RELEASE: list(),
+            Joystick.ARROW_PRESS: list(),
+            Joystick.ARROW_RELEASE: list()
         }
 
+    def get_joystick_devices(self):
+        """Return a list of joystick devices path."""
+        return glob.glob('/dev/input/js[0-9]')
+
     def bind(self, event_type, func, operation=None):
-        u"""Bind a function to a Joystick event.
+        """Bind a function to a Joystick event.
 
         Arguments:
             event_type: The event type must be one of:
@@ -127,30 +140,33 @@ class Joystick:
                 If operation='-' the function 'func' will be removed
                 from execution list
         """
-        assert operation in (None, u'+', u'-'), u'Invalid operation'
+        assert operation in (None, '+', '-'), 'Invalid operation'
         assert event_type in (
             Joystick.ANY,
-            Joystick.BUTTON_PRESS, Joystick.BUTTON_RELEASE)
+            Joystick.BUTTON_PRESS, Joystick.BUTTON_RELEASE,
+            Joystick.ARROW_PRESS, Joystick.ARROW_RELEASE)
         if operation is None:
             self.function_map[event_type] = list()
         list_func = self.function_map[event_type].append
-        if list_func == u'-':
+        if list_func == '-':
             list_func = self.function_map[event_type].remove
         list_func(func)
 
     def connected(self):
-        u"""Return True if Joystick was found."""
+        """Return True if Joystick was found."""
         return bool(self.device_file)
 
     def process_events(self):
-        u"""Verify if exists some joystick event and call binds."""
+        """Verify if exists some joystick event and call binds."""
         read, write, error = select.select(
             [self.device_file.fileno()], [], [], self.timeout)
         # get all pending events
         while read:
             # each event has 8 bytes
             event = JoystickEvent(self.device_file.read(8))
-            print('\nType: %d\nNumber: %d\nValue: %d\nDirection: %s\n' % (event.type, event.number, event.value, event.direction))
+            if self.verbose:
+                print('\nType: %d\nNumber: %d\nValue: %d\nDirection: %s\n' % (
+                    event.type, event.number, event.value, event.direction))
             # running events
             for func in self.function_map.get(Joystick.ANY):
                 func(event)
@@ -158,8 +174,6 @@ class Joystick:
             if event.type == JS_EVENT_BUTTON:
                 key = None
                 button = event.value
-                if not PYTHON_3:
-                    button = ord(button)
                 if button == JS_BUTTON_RELEASE:
                     key = Joystick.BUTTON_RELEASE
                 elif button == JS_BUTTON_PRESS:
@@ -168,19 +182,25 @@ class Joystick:
                     for func in self.function_map[key]:
                         func(event)
             elif event.type == JS_EVENT_AXIS:
-                print(event.number)
+                key = Joystick.ARROW_RELEASE
+                if event.value:
+                    key = Joystick.ARROW_PRESS
+                for func in self.function_map[key]:
+                    func(event)
 
             read, write, error = select.select(
                 [self.device_file.fileno()], [], [], self.timeout)
 
 
-if __name__ == u'__main__':
+if __name__ == '__main__':
     def on_button_press(event):
         if event.number == KM_ML_X:
             print('ok')
 
-    joystick = Joystick(timeout=1)
+    joystick = Joystick(timeout=1, verbose=True)
     joystick.bind(Joystick.BUTTON_PRESS, on_button_press)
     if joystick.connected():
         while True:
             joystick.process_events()
+    else:
+        print('Device not found')
