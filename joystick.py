@@ -103,7 +103,7 @@ class Joystick:
             if devices:
                 device_path = devices[0]
         self.device_file = None
-        if os.path.exists(device_path):
+        if device_path and os.path.exists(device_path):
             self.device_file = open(device_path, 'rb')
             atexit.register(self.device_file.close)
         self.function_map = {
